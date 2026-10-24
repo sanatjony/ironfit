@@ -1,0 +1,1291 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#090d16">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>IronFit // 4-Kunlik Trenajor Dasturi</title>
+  
+  <!-- React 18 & Babel CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            gym: {
+              black: '#070a0f',
+              card: '#111726',
+              border: '#1e293b',
+              accent: '#10b981',    /* Emerald Green */
+              accentHover: '#059669',
+              fire: '#f97316',      /* Neon Orange */
+              blue: '#3b82f6',
+              textMuted: '#94a3b8'
+            }
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Mobile scroll & touch optimization */
+    * {
+      -webkit-tap-highlight-color: transparent;
+      box-sizing: border-box;
+    }
+    body {
+      background-color: #070a0f;
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow-x: hidden;
+      touch-action: manipulation;
+    }
+    /* Custom scrollbars */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #070a0f; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 999px; }
+
+    /* Pulsing animations */
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.05); opacity: 0.4; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .animate-pulse-ring {
+      animation: pulse-ring 2s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-[#070a0f] text-slate-100 min-h-screen pb-24">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    // --- Web Audio Synthesizer (Zero-latency sound effects for countdown & finish) ---
+    class SoundManager {
+      constructor() {
+        this.ctx = null;
+      }
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext) {
+            this.ctx = new AudioContext();
+          }
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+      beep(freq = 600, duration = 0.12, type = 'sine') {
+        try {
+          this.init();
+          if (!this.ctx) return;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+          gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + duration);
+        } catch(e) {
+          console.warn("Audio error:", e);
+        }
+      }
+      shortWarning() {
+        this.beep(750, 0.15, 'sine');
+      }
+      readyAlert() {
+        // Double triumphant beep
+        this.beep(880, 0.18, 'triangle');
+        setTimeout(() => this.beep(1174, 0.35, 'triangle'), 150);
+      }
+    }
+    const soundMgr = new SoundManager();
+
+    // --- Helper to convert YouTube links (standard, shorts, share) into clean embed URLs ---
+    function formatVideoEmbed(url) {
+      if (!url) return null;
+      const cleanUrl = url.trim();
+      
+      // Standard YouTube watch
+      const watchMatch = cleanUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
+      if (watchMatch) {
+        return `https://www.youtube.com/embed/${watchMatch[1]}?autoplay=1&rel=0&modestbranding=1`;
+      }
+      
+      // YouTube Shorts
+      const shortsMatch = cleanUrl.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/);
+      if (shortsMatch) {
+        return `https://www.youtube.com/embed/${shortsMatch[1]}?autoplay=1&rel=0&modestbranding=1`;
+      }
+
+      // Direct MP4 or other video link
+      return cleanUrl;
+    }
+
+    // --- Default 4-Day Workout Program Structure ---
+    const INITIAL_DAYS = [
+      {
+        id: 1,
+        title: "1-KUN",
+        name: "Ko'krak, Yelka va Triceps",
+        subtitle: "Jami 8 ta mashq • Piramida tizimi",
+        icon: "🔥",
+        exercises: [
+          {
+            id: "ex_1_1",
+            title: "Жим лежа на горизонтальной скамье",
+            subTitleUz: "Gorizontal skameykada shtanga bilan yotib press",
+            muscle: "Ko'krak o'rtasi va umumiy massasi",
+            scheme: "2×10, 2×8, 1×6",
+            sets: 5,
+            setTargets: [10, 10, 8, 8, 6],
+            defaultWeights: [20, 20, 25, 25, 30],
+            restSec: 90,
+            tip: "Kuraklarni birlashtiring, oyoqlar polga mahkam bo'lsin. Tirsaklar tanaga ~75 darajada.",
+            startTip: "Boshlang'ich tavsiya: Bo'sh shtanga (20 kg) bilan boshlang, 6 ta takrorga 30 kg yetarli.",
+            videoUrl: "https://www.youtube.com/watch?v=4Y2ZdHCOXok"
+          },
+          {
+            id: "ex_1_2",
+            title: "Жим лежа со штангой в наклоне",
+            subTitleUz: "Qiya skameykada shtanga bilan yotib press",
+            muscle: "Ko'krakning yuqori qismi",
+            scheme: "2×10, 1×8, 1×6",
+            sets: 4,
+            setTargets: [10, 10, 8, 6],
+            defaultWeights: [15, 20, 20, 25],
+            restSec: 90,
+            tip: "Skameyka burchagi 30 daraja atrofida bo'lsin. Shtanga ko'krak yuqorisiga tushadi.",
+            startTip: "Boshlang'ich tavsiya: 15-20 kg (yengil shtanga) bilan boshlab, 25 kg gacha.",
+            videoUrl: "https://www.youtube.com/watch?v=SrqOu55lrYU"
+          },
+          {
+            id: "ex_1_3",
+            title: "Разводки с гантелями на горизонтальной скамье",
+            subTitleUz: "Gorizontal skameykada gantel yoyish (Flyes)",
+            muscle: "Ko'krakni chuqur cho'zish va shakllantirish",
+            scheme: "3×10",
+            sets: 3,
+            setTargets: [10, 10, 10],
+            defaultWeights: [5, 5, 5],
+            restSec: 60,
+            tip: "Tirsaklarni biroz bukik holda ushlang, pastda ko'krak mushagini chuqur cho'zing.",
+            startTip: "Boshlang'ich tavsiya: 5 kg lik gantellar (yelka boylamlarini asrash shart!).",
+            videoUrl: "https://www.youtube.com/watch?v=eozdVDA78K0"
+          },
+          {
+            id: "ex_1_4",
+            title: "Пуловер лежа с гантелей",
+            subTitleUz: "Yotgan holda gantel bilan Pulover",
+            muscle: "Ko'krak qafasini kengaytirish va orqa/qanotlar",
+            scheme: "3×10",
+            sets: 3,
+            setTargets: [10, 10, 10],
+            defaultWeights: [6, 8, 8],
+            restSec: 60,
+            tip: "Nafas olib gantelni bosh orqasiga tushiring, nafas chiqarib ko'krak ustiga qaytaring.",
+            startTip: "Boshlang'ich tavsiya: 6-8 kg bitta gantel (ikki qo'llab ushlanadi).",
+            videoUrl: "https://www.youtube.com/watch?v=5Y2xbhacvhk"
+          },
+          {
+            id: "ex_1_5",
+            title: "Жим со штангой стоя из-за головы",
+            subTitleUz: "Bosh orqasidan shtangani tik turib ko'tarish",
+            muscle: "Yelkalar (o'rta va orqa delta)",
+            scheme: "2×10, 2×6",
+            sets: 4,
+            setTargets: [10, 10, 6, 6],
+            defaultWeights: [12, 15, 15, 20],
+            restSec: 90,
+            tip: "Belni egiltirmang, qorinni tarang ushlang. Shtangani bosh orqasiga nazorat bilan tushiring.",
+            startTip: "O'TA MUHIM: Boshida faqat 12-15 kg kichik grif oling, 20 kg dan oshirmang!",
+            videoUrl: "https://www.youtube.com/watch?v=F3QY5vMz_6I"
+          },
+          {
+            id: "ex_1_6",
+            title: "Жим стоя с гантелей",
+            subTitleUz: "Tik turib gantel press",
+            muscle: "Yelka deltalari (old va o'rta boshlar)",
+            scheme: "3×10",
+            sets: 3,
+            setTargets: [10, 10, 10],
+            defaultWeights: [6, 6, 7],
+            restSec: 75,
+            tip: "Gantellarni to'g'ri tepaga chiqaring, lekin tepadagi nuqtada bir-biriga urishtirmang.",
+            startTip: "Boshlang'ich tavsiya: 6-7 kg gantellar (har qo'lga).",
+            videoUrl: "https://www.youtube.com/watch?v=B-aVuyhvLHU"
+          },
+          {
+            id: "ex_1_7",
+            title: "Трицепс с канатом",
+            subTitleUz: "Blokda arqon bilan triceps press (Rope Pushdown)",
+            muscle: "Tricepsning tashqi va o'rta boshlari",
+            scheme: "2×10, 2×8",
+            sets: 4,
+            setTargets: [10, 10, 8, 8],
+            defaultWeights: [10, 12, 15, 15],
+            restSec: 60,
+            tip: "Tirsaklarni gavdaga mahkam qising. Pastda arqonni ikki tomonga yoyib tricepsni siqing.",
+            startTip: "Boshlang'ich tavsiya: Blokdagi 10-15 kg plitkalar.",
+            videoUrl: "https://www.youtube.com/watch?v=vB5OHsJ3EME"
+          },
+          {
+            id: "ex_1_8",
+            title: "Французский жим с гантелями",
+            subTitleUz: "Gantel bilan frantsuzcha press (yotgan holda)",
+            muscle: "Tricepsning uzun boshi",
+            scheme: "2×10, 2×8",
+            sets: 4,
+            setTargets: [10, 10, 8, 8],
+            defaultWeights: [4, 5, 5, 6],
+            restSec: 60,
+            tip: "Tirsaklarni qimirlatmasdan, gantellarni quloqlar yoniga tushiring va yuqoriga yozing.",
+            startTip: "Boshlang'ich tavsiya: 4-6 kg gantellar (tirsaklarga ortiqcha yuklama bermang).",
+            videoUrl: "https://www.youtube.com/watch?v=d_KZxkY_0cM"
+          }
+        ]
+      },
+      {
+        id: 2,
+        title: "2-KUN",
+        name: "Orqa, Orqa Delta va Biceps",
+        subtitle: "Jami 7 ta mashq • Orqa qalinligi va Biceps",
+        icon: "⚡",
+        exercises: [
+          {
+            id: "ex_2_1",
+            title: "Становая тяга со штангой",
+            subTitleUz: "Shtanga bilan stanova tortish (Deadlift)",
+            muscle: "Butun orqa zanjiri, bel, dumba va oyoq orqasi",
+            scheme: "2×10, 2×8, 1×6",
+            sets: 5,
+            setTargets: [10, 10, 8, 8, 6],
+            defaultWeights: [30, 30, 35, 35, 40],
+            restSec: 120,
+            tip: "Belni qat'iy tekis ushlang, shtanga boldirga yaqin yursin. Ko'tarishni oyoq kuchi bilan boshlang.",
+            startTip: "MUHIM: Belni aslo bukmang! 30 kg dan boshlab, eng ko'pi 40 kg yetadi.",
+            videoUrl: "https://www.youtube.com/watch?v=op9kVnSso6Q"
+          },
+          {
+            id: "ex_2_2",
+            title: "Тяга в наклоне с гантелей",
+            subTitleUz: "Bir qo'l bilan egilib gantel tortish (One-arm DB Row)",
+            muscle: "Qanotlar (eng keng orqa mushaklar)",
+            scheme: "3×10",
+            sets: 3,
+            setTargets: [10, 10, 10],
+            defaultWeights: [8, 8, 10],
+            restSec: 75,
+            tip: "Skameykaga bitta tizza va qo'l bilan tayanib, gantelni songa qarab torting, tirsakni yuqoriga chiqaring.",
+            startTip: "Boshlang'ich tavsiya: 8-10 kg lik bitta gantel.",
+            videoUrl: "https://www.youtube.com/watch?v=pYcpY20QaE8"
+          },
+          {
+            id: "ex_2_3",
+            title: "Тяга к животу на горизонтальном тренажере",
+            subTitleUz: "Gorizontal blokni qoringa tortish (Seated Cable Row)",
+            muscle: "Orqa o'rta qismi va rombsimon mushaklar",
+            scheme: "2×10, 1×8",
+            sets: 3,
+            setTargets: [10, 10, 8],
+            defaultWeights: [25, 25, 30],
+            restSec: 60,
+            tip: "Gavdani oldi-orqaga tebratmasdan, tortish paytida kuraklarni bir-biriga jipslang.",
+            startTip: "Boshlang'ich tavsiya: 25-30 kg (blokdagi plitkalar).",
+            videoUrl: "https://www.youtube.com/watch?v=GZbfZ033f74"
+          },
+          {
+            id: "ex_2_4",
+            title: "Тяга 2х гантель в наклоне",
+            subTitleUz: "Egilib ikkala gantelni birga belga tortish",
+            muscle: "Orqa qalinligi va yuqori orqa mushaklari",
+            scheme: "3×10",
+            sets: 3,
+            setTargets: [10, 10, 10],
+            defaultWeights: [7, 7, 8],
+            restSec: 75,
+            tip: "Tizlarni biroz buking, korpus 45 gradus egilgan. Gantellarni tirsak orqali yuqoriga torting.",
+            startTip: "Boshlang'ich tavsiya: 7-8 kg gantellar.",
+            videoUrl: "https://www.youtube.com/watch?v=6TSP13GCkhM"
+          },
+          {
+            id: "ex_2_5",
+            title: "Задние дельты отведение с нижнего блока",
+            subTitleUz: "Pastki blokdan orqa deltani chetga tortish",
+            muscle: "Orqa delta (yelkaning orqa qismi)",
+            scheme: "3×12",
+            sets: 3,
+            setTargets: [12, 12, 12],
+            defaultWeights: [5, 5, 5],
+            restSec: 60,
+            tip: "Tirsaklarni qotirib, faqat orqa yelka mushaklari hisobiga trosni chetga yoying.",
+            startTip: "Boshlang'ich tavsiya: 5 kg (1-plitka), texnikani his qilish asosiy maqsad.",
+            videoUrl: "https://www.youtube.com/watch?v=eaL_rA4mQ1g"
+          },
+          {
+            id: "ex_2_6",
+            title: "Бицепс с гантелей",
+            subTitleUz: "Gantellarni navbatma-navbat yoki birga bukib ko'tarish",
+            muscle: "Biceps umumiy massasi va cho'qqisi",
+            scheme: "2×12, 2×10",
+            sets: 4,
+            setTargets: [12, 12, 10, 10],
+            defaultWeights: [6, 6, 7, 8],
+            restSec: 60,
+            tip: "Tirsaklarni bir joyda mustahkam ushlang, tanani tebratmasdan faqat bicepsni qisib ko'taring.",
+            startTip: "Boshlang'ich tavsiya: 6-8 kg gantellar.",
+            videoUrl: "https://www.youtube.com/watch?v=sAq_ocpRh_I"
+          },
+          {
+            id: "ex_2_7",
+            title: "Бицепс с гантелей молот",
+            subTitleUz: "Bolg'acha usulida gantel ko'tarish (Hammer Curls)",
+            muscle: "Braxialis va bilak mushaklari (biceps qalinligi)",
+            scheme: "2×10, 2×8",
+            sets: 4,
+            setTargets: [10, 10, 8, 8],
+            defaultWeights: [7, 7, 8, 8],
+            restSec: 60,
+            tip: "Kaftlar har doim bir-biriga qaragan holda ko'tariladi, pastda sekin tushiring.",
+            startTip: "Boshlang'ich tavsiya: 7-8 kg gantellar.",
+            videoUrl: "https://www.youtube.com/watch?v=zC3nLlEvin4"
+          }
+        ]
+      },
+      {
+        id: 3,
+        title: "3-KUN",
+        name: "Oyoq va Dumba (Leg Day)",
+        subtitle: "Jami 5 ta mashq • Baza va kuch",
+        icon: "🦵",
+        exercises: [
+          {
+            id: "ex_3_1",
+            title: "Разведение ног сидя",
+            subTitleUz: "Trenajyorda o'tirib oyoqlarni yonga yoyish",
+            muscle: "Dumba o'rta va kichik mushaklari (Gluteus medius)",
+            scheme: "4×20",
+            sets: 4,
+            setTargets: [20, 20, 20, 20],
+            defaultWeights: [20, 20, 25, 25],
+            restSec: 45,
+            tip: "Gavdani biroz oldinga engashtirib, harakat oxirida dumbani qattiq siqib oching.",
+            startTip: "Boshlang'ich tavsiya: 20-25 kg (razminka va qon haydash).",
+            videoUrl: "https://www.youtube.com/watch?v=nblbMpnKx9Q"
+          },
+          {
+            id: "ex_3_2",
+            title: "Приседание со штангой",
+            subTitleUz: "Shtanga bilan o'tirib-turish (Squats)",
+            muscle: "Kvadritseps, dumba va butun korpus quvvati",
+            scheme: "2×10, 2×8, 1×6",
+            sets: 5,
+            setTargets: [10, 10, 8, 8, 6],
+            defaultWeights: [20, 20, 25, 25, 30],
+            restSec: 120,
+            tip: "Tizlar paypoq yo'nalishida ochilsin, tovonni poldan uzmang, bel tekis turadi.",
+            startTip: "Boshlang'ich tavsiya: Bo'sh 20 kg shtanga bilan boshlang, 30 kg dan oshirmang!",
+            videoUrl: "https://www.youtube.com/watch?v=ultWZbUMPL8"
+          },
+          {
+            id: "ex_3_3",
+            title: "Сумо присед со штангой",
+            subTitleUz: "Oyoqlarni keng qo'yib shtanga bilan o'tirish (Sumo Squat)",
+            muscle: "Sonning ichki qismi (adduktorlar) va dumba",
+            scheme: "3×12",
+            sets: 3,
+            setTargets: [12, 12, 12],
+            defaultWeights: [20, 20, 25],
+            restSec: 90,
+            tip: "Oyoqlar yelkadan kengroq, paypoqlar tashqariga 45 gradus, gavda tik ushlanadi.",
+            startTip: "Boshlang'ich tavsiya: 20-25 kg shtanga.",
+            videoUrl: "https://www.youtube.com/watch?v=7Xw97T4Bfbg"
+          },
+          {
+            id: "ex_3_4",
+            title: "Разгибание ног сидя",
+            subTitleUz: "Trenajyorda o'tirib oyoqlarni yozish",
+            muscle: "Kvadritseps relyefi va shakli",
+            scheme: "2×12, 2×8, 1×6",
+            sets: 5,
+            setTargets: [12, 12, 8, 8, 6],
+            defaultWeights: [15, 15, 20, 20, 25],
+            restSec: 60,
+            tip: "Tepada 1 soniya ushlab son mushagini maksimal qising, pastga sekin tushiring.",
+            startTip: "Boshlang'ich tavsiya: 15-25 kg trenajyorda.",
+            videoUrl: "https://www.youtube.com/watch?v=YyvSfVjQeL0"
+          },
+          {
+            id: "ex_3_5",
+            title: "Жим ногами",
+            subTitleUz: "Trenajyorda oyoq bilan press (Leg Press)",
+            muscle: "Son, kvadritseps va dumba",
+            scheme: "2×10, 2×8, 2×6",
+            sets: 6,
+            setTargets: [10, 10, 8, 8, 6, 6],
+            defaultWeights: [40, 40, 50, 50, 60, 60],
+            restSec: 90,
+            tip: "Tepada tizzalarni oxirigacha qotirib qo'ymang! Harakat faqat nazorat ostida bo'lsin.",
+            startTip: "Boshlang'ich tavsiya: 40-60 kg (platformaning o'zi + kichik blinchiklar).",
+            videoUrl: "https://www.youtube.com/watch?v=IZxyjW7MPJQ"
+          }
+        ]
+      },
+      {
+        id: 4,
+        title: "4-KUN",
+        name: "Ko'krak, Yelka, Shvung va Turnik",
+        subtitle: "Jami 5 ta mashq • Kuch va Portlash",
+        icon: "💥",
+        exercises: [
+          {
+            id: "ex_4_1",
+            title: "Жим лежа со штангой",
+            subTitleUz: "Gorizontal skameykada shtanga bilan yotib press",
+            muscle: "Ko'krak umumiy massasi va quvvati",
+            scheme: "2×10, 2×8, 2×6",
+            sets: 6,
+            setTargets: [10, 10, 8, 8, 6, 6],
+            defaultWeights: [20, 20, 25, 25, 30, 30],
+            restSec: 90,
+            tip: "Ko'krakni oldinga chiqaring, kuraklarni qising. Shtangani pastda ko'krak o'rtasiga tekkazib, yuqoriga ko'taring.",
+            startTip: "Boshlang'ich tavsiya: 20-30 kg.",
+            videoUrl: "https://www.youtube.com/watch?v=4Y2ZdHCOXok"
+          },
+          {
+            id: "ex_4_2",
+            title: "Жим стоя со штангой из-за головы",
+            subTitleUz: "Bosh orqasidan shtangani tik turib ko'tarish",
+            muscle: "Yelka deltalari, trapeziya va kuch",
+            scheme: "2×8, 2×6, 1×3",
+            sets: 5,
+            setTargets: [8, 8, 6, 6, 3],
+            defaultWeights: [15, 15, 17.5, 17.5, 20],
+            restSec: 105,
+            tip: "Har bir takror nazoratda bo'lsin. Bo'yinga ehtiyot bo'ling, og'irlikni to'g'ri tanlang.",
+            startTip: "MUHIM: Faqat 15-20 kg gacha! Og'irlik qo'shishga shoshilmang.",
+            videoUrl: "https://www.youtube.com/watch?v=F3QY5vMz_6I"
+          },
+          {
+            id: "ex_4_3",
+            title: "Швунги со штангой",
+            subTitleUz: "Oyoq kuchi bilan shtangani yuqoriga siltab ko'tarish (Push Press)",
+            muscle: "Portlovchi kuch, yelka, oyoq turtkisi va butun korpus",
+            scheme: "2×8, 2×6, 1×4",
+            sets: 5,
+            setTargets: [8, 8, 6, 6, 4],
+            defaultWeights: [20, 20, 25, 25, 30],
+            restSec: 105,
+            tip: "Tizlarni biroz bukib, butun tana inersiyasi bilan shtangani tepaga suring va qo'llarni to'g'rilang.",
+            startTip: "Boshlang'ich tavsiya: 20-30 kg (harakatni oyoq bilan boshlash muhim).",
+            videoUrl: "https://www.youtube.com/watch?v=X6-D6yN7L1k"
+          },
+          {
+            id: "ex_4_4",
+            title: "Подтягивание",
+            subTitleUz: "Turnikda oxirigacha tortilish (Pull-ups to failure)",
+            muscle: "Qanotlar (Latissimus dorsi), orqa va biceps",
+            scheme: "4× Otkazgacha (MAX)",
+            sets: 4,
+            setTargets: ["MAX", "MAX", "MAX", "MAX"],
+            defaultWeights: ["Tana", "Tana", "Tana", "Tana"],
+            restSec: 90,
+            tip: "Siltanishlarsiz, har bir podxodda quvvatingiz yetguncha (otkazgacha) toza tortiling.",
+            startTip: "Boshlovchilar uchun: Zalida Gravitron bo'lsa 30-40 kg qarshi vazn qo'ying yoki rezinka ishlating.",
+            videoUrl: "https://www.youtube.com/watch?v=eGo4IYlbE5g"
+          },
+          {
+            id: "ex_4_5",
+            title: "Жим стоя с гантелей",
+            subTitleUz: "Tik turib gantel press",
+            muscle: "Yelka deltalari (old va o'rta boshlar)",
+            scheme: "2×8, 2×6",
+            sets: 4,
+            setTargets: [8, 8, 6, 6],
+            defaultWeights: [6, 6, 7, 8],
+            restSec: 75,
+            tip: "Gavdani tebratmasdan, faqat yelka kuchi bilan gantellarni tepaga chiqaring.",
+            startTip: "Boshlang'ich tavsiya: 6-8 kg gantellar.",
+            videoUrl: "https://www.youtube.com/watch?v=B-aVuyhvLHU"
+          }
+        ]
+      }
+    ];
+
+    // --- Main App Component ---
+    function App() {
+      // Days Data (Stored in LocalStorage so user updates persist)
+      const [daysData, setDaysData] = useState(() => {
+        try {
+          const saved = localStorage.getItem('ironfit_workout_data_v7');
+          return saved ? JSON.parse(saved) : INITIAL_DAYS;
+        } catch (e) {
+          return INITIAL_DAYS;
+        }
+      });
+
+      // Active day (1, 2, 3, 4)
+      const [selectedDayId, setSelectedDayId] = useState(1);
+
+      // Workout progress & session state
+      // setLogs = { [exerciseId]: { [setIndex]: { done: boolean, weight: string, reps: string } } }
+      const [setLogs, setSetLogs] = useState(() => {
+        try {
+          const saved = localStorage.getItem('ironfit_logs_v7');
+          return saved ? JSON.parse(saved) : {};
+        } catch(e) {
+          return {};
+        }
+      });
+
+      // Rest Timer State
+      const [timerRunning, setTimerRunning] = useState(false);
+      const [timerTotal, setTimerTotal] = useState(60);
+      const [timerLeft, setTimerLeft] = useState(0);
+      const [timerExName, setTimerExName] = useState("");
+      const timerIntervalRef = useRef(null);
+
+      // Active Video Modal
+      const [activeVideo, setActiveVideo] = useState(null); // { title, url, tip }
+
+      // Program Editor Modal
+      const [showEditor, setShowEditor] = useState(false);
+      const [jsonEditText, setJsonEditText] = useState("");
+
+      // Phone Connect / QR Modal
+      const [showQrModal, setShowQrModal] = useState(false);
+
+      // Screen WakeLock ref
+      const wakeLockRef = useRef(null);
+
+      // Save logs
+      useEffect(() => {
+        try {
+          localStorage.setItem('ironfit_logs_v7', JSON.stringify(setLogs));
+        } catch(e) {}
+      }, [setLogs]);
+
+      // Save custom program data
+      useEffect(() => {
+        try {
+          localStorage.setItem('ironfit_workout_data_v7', JSON.stringify(daysData));
+        } catch(e) {}
+      }, [daysData]);
+
+      // Screen Wake Lock (prevents screen sleep during workout)
+      const requestWakeLock = async () => {
+        try {
+          if ('wakeLock' in navigator && !wakeLockRef.current) {
+            wakeLockRef.current = await navigator.wakeLock.request('screen');
+          }
+        } catch(err) {
+          console.log("WakeLock error or unsupported:", err);
+        }
+      };
+
+      // Timer countdown effect
+      useEffect(() => {
+        if (timerRunning && timerLeft > 0) {
+          timerIntervalRef.current = setInterval(() => {
+            setTimerLeft(prev => {
+              if (prev <= 1) {
+                // Timer finished!
+                clearInterval(timerIntervalRef.current);
+                setTimerRunning(false);
+                soundMgr.readyAlert();
+                if (navigator.vibrate) {
+                  navigator.vibrate([250, 100, 250, 100, 400]);
+                }
+                return 0;
+              }
+
+              // Warning sound at 3, 2, 1
+              if (prev <= 4 && prev > 1) {
+                soundMgr.shortWarning();
+                if (navigator.vibrate) navigator.vibrate(80);
+              }
+
+              return prev - 1;
+            });
+          }, 1000);
+        } else {
+          clearInterval(timerIntervalRef.current);
+        }
+        return () => clearInterval(timerIntervalRef.current);
+      }, [timerRunning, timerLeft]);
+
+      // Trigger Rest Timer
+      const startRestTimer = (seconds, exTitle) => {
+        requestWakeLock();
+        soundMgr.init();
+        setTimerTotal(seconds);
+        setTimerLeft(seconds);
+        setTimerExName(exTitle);
+        setTimerRunning(true);
+      };
+
+      const stopRestTimer = () => {
+        setTimerRunning(false);
+        setTimerLeft(0);
+      };
+
+      const adjustTimer = (seconds) => {
+        setTimerLeft(prev => Math.max(0, prev + seconds));
+      };
+
+      // Mark set done / undone
+      const toggleSet = (exId, setIdx, defaultRestSec, exTitle) => {
+        soundMgr.init();
+        setSetLogs(prev => {
+          const exLogs = prev[exId] || {};
+          const current = exLogs[setIdx] || {};
+          const willBeDone = !current.done;
+
+          const updated = {
+            ...prev,
+            [exId]: {
+              ...exLogs,
+              [setIdx]: {
+                ...current,
+                done: willBeDone
+              }
+            }
+          };
+
+          // If marked done, trigger rest timer!
+          if (willBeDone) {
+            startRestTimer(defaultRestSec || 60, exTitle);
+          }
+          return updated;
+        });
+      };
+
+      // Update Weight / Reps in Set
+      const updateSetField = (exId, setIdx, field, val) => {
+        setSetLogs(prev => {
+          const exLogs = prev[exId] || {};
+          const current = exLogs[setIdx] || {};
+          return {
+            ...prev,
+            [exId]: {
+              ...exLogs,
+              [setIdx]: {
+                ...current,
+                [field]: val
+              }
+            }
+          };
+        });
+      };
+
+      // Reset day progress
+      const resetDayProgress = (day) => {
+        if (!confirm(`${day.name} bo'yicha barcha belgilangan podxodlarni tozalaysizmi?`)) return;
+        setSetLogs(prev => {
+          const next = { ...prev };
+          day.exercises.forEach(ex => {
+            delete next[ex.id];
+          });
+          return next;
+        });
+      };
+
+      // Current Day Data
+      const currentDay = useMemo(() => {
+        return daysData.find(d => d.id === selectedDayId) || daysData[0];
+      }, [daysData, selectedDayId]);
+
+      // Calculate Day Completion %
+      const dayStats = useMemo(() => {
+        if (!currentDay) return { totalSets: 0, completedSets: 0, percent: 0 };
+        let total = 0;
+        let completed = 0;
+        currentDay.exercises.forEach(ex => {
+          total += ex.sets;
+          const exLogs = setLogs[ex.id] || {};
+          for (let i = 0; i < ex.sets; i++) {
+            if (exLogs[i]?.done) completed++;
+          }
+        });
+        const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+        return { totalSets: total, completedSets: completed, percent };
+      }, [currentDay, setLogs]);
+
+      // Format time helper (MM:SS)
+      const formatTime = (sec) => {
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        return `${m}:${s < 10 ? '0' : ''}${s}`;
+      };
+
+      // Open Editor
+      const openEditor = () => {
+        setJsonEditText(JSON.stringify(daysData, null, 2));
+        setShowEditor(true);
+      };
+
+      const saveEditorJson = () => {
+        try {
+          const parsed = JSON.parse(jsonEditText);
+          if (!Array.isArray(parsed) || parsed.length !== 4) {
+            alert("Xatolik: Ro'yxat 4 ta kundan iborat massiv bo'lishi kerak!");
+            return;
+          }
+          setDaysData(parsed);
+          setShowEditor(false);
+          alert("Dastur muvaffaqiyatli saqlandi!");
+        } catch(e) {
+          alert("JSON formatida xatolik bor! Iltimos, tekshirib qaytadan urinib ko'ring.");
+        }
+      };
+
+      return (
+        <div className="max-w-md mx-auto min-h-screen px-3 pt-3 pb-28">
+          
+          {/* Top Header */}
+          <header className="flex items-center justify-between py-3 mb-2 border-b border-gym-border/60">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-700 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-xl font-bold">
+                🏋️‍♂️
+              </div>
+              <div>
+                <h1 className="text-lg font-black tracking-wide text-white flex items-center gap-1.5">
+                  IRON<span className="text-gym-accent">FIT</span>
+                  <span className="text-[10px] uppercase font-semibold tracking-wider bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20">4 KUN</span>
+                </h1>
+                <p className="text-xs text-gym-textMuted">Shaxsiy trenirovka rejangiz</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button 
+                onClick={() => setShowQrModal(true)}
+                className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-xs flex items-center gap-1 active:scale-95 transition font-semibold"
+                title="Telefonda ochish"
+              >
+                📱 <span className="hidden sm:inline">Telefon</span>
+              </button>
+              <button 
+                onClick={openEditor}
+                className="p-2 rounded-lg bg-gym-card border border-gym-border text-slate-300 hover:text-white text-xs flex items-center gap-1 active:scale-95 transition"
+                title="Dasturni tahrirlash"
+              >
+                ⚙️ <span className="hidden sm:inline">Dastur</span>
+              </button>
+            </div>
+          </header>
+
+          {/* User Profile & Safety Badge */}
+          <div className="bg-gradient-to-r from-emerald-950/40 via-gym-card to-slate-900 border border-emerald-500/30 rounded-xl p-2.5 my-2 flex items-center justify-between text-xs shadow-md">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">👤</span>
+              <div>
+                <p className="font-bold text-white text-[11px] flex items-center gap-1.5">
+                  <span>31 yosh • 75 kg • 180 sm</span>
+                  <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-black uppercase">Boshlovchi</span>
+                </p>
+                <p className="text-[10px] text-emerald-300/80">Xavfsiz boshlang'ich vaznlar (kg) kiritildi</p>
+              </div>
+            </div>
+            <a 
+              href="https://bfeecec80f4159.lhr.life" 
+              target="_blank" 
+              className="text-[10px] bg-emerald-500 hover:bg-emerald-600 text-black font-black px-2 py-1 rounded-lg transition"
+            >
+              Havola
+            </a>
+          </div>
+
+          {/* 4-Day Switcher Tabs */}
+          <div className="grid grid-cols-4 gap-1.5 my-3">
+            {daysData.map(day => {
+              const isActive = day.id === selectedDayId;
+              return (
+                <button
+                  key={day.id}
+                  onClick={() => setSelectedDayId(day.id)}
+                  className={`flex flex-col items-center justify-center py-2.5 px-1 rounded-xl transition-all font-bold text-center border relative overflow-hidden ${
+                    isActive 
+                      ? 'bg-gradient-to-b from-emerald-500/20 to-emerald-600/10 border-emerald-500 text-emerald-400 shadow-md shadow-emerald-500/10' 
+                      : 'bg-gym-card/80 border-gym-border/70 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                  }`}
+                >
+                  <span className="text-xs opacity-75">{day.icon}</span>
+                  <span className="text-xs uppercase tracking-wider mt-0.5">{day.title}</span>
+                  {isActive && (
+                    <span className="absolute bottom-0 inset-x-0 h-1 bg-gym-accent rounded-full"></span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Active Day Banner & Progress Card */}
+          <div className="bg-gradient-to-br from-gym-card to-[#0d1322] border border-gym-border rounded-2xl p-4 my-3 shadow-xl relative overflow-hidden">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <span className="inline-block text-[11px] font-bold text-emerald-400 uppercase tracking-widest mb-1">
+                  {currentDay.title} • {currentDay.subtitle}
+                </span>
+                <h2 className="text-xl font-black text-white leading-tight">
+                  {currentDay.name}
+                </h2>
+              </div>
+              <button
+                onClick={() => resetDayProgress(currentDay)}
+                className="text-[11px] text-slate-400 hover:text-rose-400 bg-gym-border/40 hover:bg-rose-500/10 px-2 py-1 rounded-md border border-gym-border transition"
+                title="Ushbu kun podxodlarini nollash"
+              >
+                Tozalash
+              </button>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="mt-4">
+              <div className="flex items-center justify-between text-xs font-semibold mb-1.5">
+                <span className="text-slate-400">Kunlik progress</span>
+                <span className="text-emerald-400">{dayStats.completedSets} / {dayStats.totalSets} podxod ({dayStats.percent}%)</span>
+              </div>
+              <div className="w-full h-2.5 bg-slate-900 rounded-full overflow-hidden border border-gym-border/80">
+                <div 
+                  className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500"
+                  style={{ width: `${dayStats.percent}%` }}
+                ></div>
+              </div>
+            </div>
+          </div>
+
+          {/* Exercises List */}
+          <div className="space-y-3 mt-4">
+            {currentDay.exercises.map((ex, exIndex) => {
+              const exLog = setLogs[ex.id] || {};
+              const completedCount = Object.values(exLog).filter(s => s?.done).length;
+              const isAllDone = completedCount >= ex.sets;
+
+              return (
+                <div 
+                  key={ex.id}
+                  className={`bg-gym-card border rounded-2xl transition-all duration-200 overflow-hidden ${
+                    isAllDone ? 'border-emerald-500/40 bg-emerald-950/10' : 'border-gym-border'
+                  }`}
+                >
+                  {/* Exercise Header */}
+                  <div className="p-3.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2.5">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-lg bg-gym-border/60 text-slate-300 font-bold text-xs flex items-center justify-center mt-0.5">
+                          {exIndex + 1}
+                        </span>
+                        <div className="flex-1">
+                          <h3 className="font-bold text-slate-100 text-sm leading-snug">
+                            {ex.title}
+                          </h3>
+                          {ex.subTitleUz && (
+                            <p className="text-[11px] text-slate-400 font-medium">
+                              {ex.subTitleUz}
+                            </p>
+                          )}
+                          <p className="text-[11px] text-emerald-400 font-medium mt-0.5">
+                            🎯 {ex.muscle}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Video Button */}
+                      {ex.videoUrl ? (
+                        <button
+                          onClick={() => setActiveVideo(ex)}
+                          className="flex-shrink-0 flex items-center gap-1 text-[11px] font-bold bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 px-2.5 py-1 rounded-lg transition active:scale-95"
+                        >
+                          <span>▶</span> Video
+                        </button>
+                      ) : (
+                        <span className="flex-shrink-0 text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700">
+                          Video kutilmoqda
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Technique Tip */}
+                    {ex.tip && (
+                      <div className="mt-2.5 text-[11px] bg-slate-900/70 border border-gym-border/50 text-slate-300 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5">
+                        <span className="text-amber-400">💡</span>
+                        <span>{ex.tip}</span>
+                      </div>
+                    )}
+
+                    {/* Beginner Start Tip */}
+                    {ex.startTip && (
+                      <div className="mt-2 text-[11px] bg-amber-500/10 border border-amber-500/30 text-amber-300 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5">
+                        <span>⚖️</span>
+                        <span className="font-semibold">{ex.startTip}</span>
+                      </div>
+                    )}
+
+                    {/* Meta stats badges */}
+                    <div className="flex flex-wrap items-center gap-2 mt-3 text-[11px]">
+                      <span className="bg-gym-border/50 text-slate-300 px-2 py-0.5 rounded font-medium">
+                        🔁 {ex.scheme ? `Reja: ${ex.scheme}` : `${ex.sets} podxod × ${ex.reps} marta`}
+                      </span>
+                      <span className="bg-gym-border/50 text-slate-300 px-2 py-0.5 rounded font-medium">
+                        ⏱️ Tanaffus: {ex.restSec || 60}s
+                      </span>
+                    </div>
+
+                    {/* Interactive Sets Table */}
+                    <div className="mt-3.5 space-y-1.5">
+                      <div className="grid grid-cols-12 gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1 mb-1">
+                        <div className="col-span-2 text-center">Podxod</div>
+                        <div className="col-span-4 text-center">Vazn (tavsiya kg)</div>
+                        <div className="col-span-3 text-center">Takror</div>
+                        <div className="col-span-3 text-center">Holat</div>
+                      </div>
+
+                      {Array.from({ length: ex.sets }).map((_, setIdx) => {
+                        const setItem = exLog[setIdx] || { done: false, weight: '', reps: '' };
+                        const targetReps = ex.setTargets ? ex.setTargets[setIdx] : ex.reps;
+                        const recWeight = ex.defaultWeights ? ex.defaultWeights[setIdx] : '';
+                        const currentWeight = setItem.weight !== undefined && setItem.weight !== '' ? setItem.weight : recWeight;
+                        return (
+                          <div 
+                            key={setIdx} 
+                            className={`grid grid-cols-12 gap-1.5 items-center p-1.5 rounded-xl border transition ${
+                              setItem.done 
+                                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200' 
+                                : 'bg-slate-900/60 border-gym-border/60 text-slate-200'
+                            }`}
+                          >
+                            <div className="col-span-2 text-center font-bold text-xs flex flex-col items-center">
+                              <span>#{setIdx + 1}</span>
+                              {targetReps && (
+                                <span className="text-[9px] text-emerald-400 font-semibold">{targetReps} ta</span>
+                              )}
+                            </div>
+
+                            <div className="col-span-4">
+                              <input 
+                                type="text" 
+                                placeholder={recWeight ? `${recWeight} kg` : 'kg'}
+                                value={currentWeight !== undefined ? currentWeight : ''}
+                                onChange={(e) => updateSetField(ex.id, setIdx, 'weight', e.target.value)}
+                                className="w-full text-center bg-black/40 border border-gym-border/80 focus:border-emerald-500 text-xs font-bold py-1.5 rounded-lg outline-none text-emerald-300"
+                              />
+                            </div>
+
+                            <div className="col-span-3">
+                              <input 
+                                type="text" 
+                                placeholder={targetReps ? `${targetReps}` : '10'}
+                                value={setItem.reps || ''}
+                                onChange={(e) => updateSetField(ex.id, setIdx, 'reps', e.target.value)}
+                                className="w-full text-center bg-black/40 border border-gym-border/80 focus:border-emerald-500 text-xs font-bold py-1.5 rounded-lg outline-none text-white"
+                              />
+                            </div>
+
+                            <div className="col-span-3">
+                              <button
+                                onClick={() => toggleSet(ex.id, setIdx, ex.restSec, ex.title)}
+                                className={`w-full py-1.5 text-xs font-black rounded-lg transition active:scale-95 flex items-center justify-center gap-1 ${
+                                  setItem.done 
+                                    ? 'bg-emerald-500 hover:bg-emerald-600 text-black shadow-md shadow-emerald-500/20' 
+                                    : 'bg-gym-border/80 hover:bg-slate-700 text-slate-300'
+                                }`}
+                              >
+                                {setItem.done ? '✓ Tayyor' : 'Bajarish'}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Persistent Floating Rest Timer (Active Workout Bar) */}
+          {timerRunning && (
+            <div className="fixed bottom-3 inset-x-3 max-w-md mx-auto z-40">
+              <div className="bg-gradient-to-r from-emerald-950 via-gray-900 to-black border-2 border-emerald-500/80 rounded-2xl p-3.5 shadow-2xl shadow-emerald-500/30 flex items-center justify-between gap-3 backdrop-blur-md">
+                
+                <div className="flex items-center gap-3">
+                  {/* Circular / Pulsing countdown indicator */}
+                  <div className="relative w-12 h-12 flex-shrink-0 flex items-center justify-center bg-emerald-500/20 rounded-full border border-emerald-500">
+                    <span className="text-base font-black text-emerald-400 font-mono">
+                      {timerLeft}s
+                    </span>
+                    <span className="absolute inset-0 rounded-full border border-emerald-400 animate-pulse-ring"></span>
+                  </div>
+
+                  <div className="overflow-hidden">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1">
+                      <span>⏱️ Tanaffus vaqti</span>
+                    </div>
+                    <p className="text-xs font-bold text-white truncate max-w-[140px] sm:max-w-[170px]">
+                      {timerExName || 'Dam oling va nafasni rostlang'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Timer Controls */}
+                <div className="flex items-center gap-1.5">
+                  <button 
+                    onClick={() => adjustTimer(-15)}
+                    className="p-1.5 text-xs font-bold bg-gym-border/60 hover:bg-gym-border text-slate-300 rounded-lg active:scale-95 transition"
+                    title="-15 soniya"
+                  >
+                    -15s
+                  </button>
+                  <button 
+                    onClick={() => adjustTimer(15)}
+                    className="p-1.5 text-xs font-bold bg-gym-border/60 hover:bg-gym-border text-slate-300 rounded-lg active:scale-95 transition"
+                    title="+15 soniya"
+                  >
+                    +15s
+                  </button>
+                  <button 
+                    onClick={stopRestTimer}
+                    className="px-2.5 py-1.5 text-xs font-black bg-rose-600 hover:bg-rose-500 text-white rounded-lg active:scale-95 transition shadow-sm"
+                  >
+                    O'tkazish
+                  </button>
+                </div>
+
+              </div>
+            </div>
+          )}
+
+          {/* Video Popup Modal */}
+          {activeVideo && (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 animate-fade-in">
+              <div className="bg-gym-card border border-gym-border rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl relative">
+                {/* Modal Header */}
+                <div className="flex items-center justify-between p-3.5 border-b border-gym-border">
+                  <h3 className="font-bold text-sm text-white truncate pr-2">
+                    {activeVideo.title}
+                  </h3>
+                  <button 
+                    onClick={() => setActiveVideo(null)}
+                    className="w-8 h-8 rounded-lg bg-gym-border/60 text-slate-300 hover:text-white flex items-center justify-center font-bold text-sm transition"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Modal Video Player Container */}
+                <div className="w-full bg-black aspect-video relative">
+                  {formatVideoEmbed(activeVideo.videoUrl) ? (
+                    formatVideoEmbed(activeVideo.videoUrl).includes('youtube.com/embed') ? (
+                      <iframe 
+                        src={formatVideoEmbed(activeVideo.videoUrl)}
+                        title={activeVideo.title}
+                        className="w-full h-full border-0"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowFullScreen
+                      ></iframe>
+                    ) : (
+                      <video 
+                        src={activeVideo.videoUrl} 
+                        controls 
+                        autoPlay 
+                        className="w-full h-full object-contain"
+                      ></video>
+                    )
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-slate-400 p-4 text-center">
+                      <span className="text-3xl mb-2">📹</span>
+                      <p className="text-sm">Ushbu mashq uchun video havola biriktirilmagan.</p>
+                      <p className="text-xs text-slate-500 mt-1">Havolani dastur sozlamalaridan qo'shishingiz mumkin.</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Technique Tip in Modal */}
+                {activeVideo.tip && (
+                  <div className="p-3 bg-slate-900/90 border-t border-gym-border/60">
+                    <p className="text-xs text-emerald-300 flex items-start gap-1.5">
+                      <span>💡</span>
+                      <span><strong>Texnika:</strong> {activeVideo.tip}</span>
+                    </p>
+                  </div>
+                )}
+
+                {/* Action Buttons Bottom */}
+                <div className="p-3 border-t border-gym-border/60 flex items-center justify-between gap-2">
+                  {activeVideo.videoUrl && (
+                    <a 
+                      href={activeVideo.videoUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1.5 font-bold bg-red-600/10 hover:bg-red-600/20 px-3 py-2 rounded-xl border border-red-500/20 transition"
+                    >
+                      <span>▶</span> YouTube-da ochish
+                    </a>
+                  )}
+                  <button 
+                    onClick={() => setActiveVideo(null)}
+                    className="px-4 py-2 bg-gym-border hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition ml-auto"
+                  >
+                    Yopish
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Phone Connect / QR Modal */}
+          {showQrModal && (
+            <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 animate-fade-in">
+              <div className="bg-gym-card border border-gym-border rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-4">
+                <div className="flex items-center justify-between pb-3 border-b border-gym-border">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">📱</span>
+                    <h3 className="font-bold text-sm text-white">Telefonda Ochish</h3>
+                  </div>
+                  <button 
+                    onClick={() => setShowQrModal(false)}
+                    className="w-7 h-7 rounded-lg bg-gym-border/60 text-slate-300 hover:text-white flex items-center justify-center font-bold text-xs"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="py-4 text-center">
+                  <div className="bg-white p-3 rounded-2xl inline-block shadow-lg mx-auto mb-3">
+                    <img 
+                      src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=https://bfeecec80f4159.lhr.life" 
+                      alt="QR Code" 
+                      className="w-40 h-40 block"
+                    />
+                  </div>
+
+                  <div className="mb-3 text-left bg-black/50 p-2.5 rounded-xl border border-gym-border">
+                    <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider mb-1">
+                      🌐 To'g'ridan-to'g'ri Telefon Havolasi (Internetda):
+                    </p>
+                    <a 
+                      href="https://bfeecec80f4159.lhr.life" 
+                      target="_blank"
+                      className="text-xs font-bold text-white hover:underline break-all font-mono"
+                    >
+                      https://bfeecec80f4159.lhr.life
+                    </a>
+                  </div>
+
+                  <p className="text-[11px] text-slate-300">
+                    Telefoningiz kamerasini QR kodga qarating yoki ushbu havolani telefoningizda (Safari / Chrome) oching.
+                  </p>
+
+                  <div className="mt-4 p-2.5 bg-slate-900/80 rounded-xl border border-gym-border/60 text-left text-[11px] text-slate-300 space-y-1.5">
+                    <p className="font-bold text-emerald-400 flex items-center gap-1">
+                      <span>💡</span> Qulaylik uchun maslahat:
+                    </p>
+                    <p>Telefonda ochgach, brauzer menyusidan <strong>"Bosh ekranga qo'shish" (Add to Home Screen)</strong> tugmasini bosing. Ilova telefonga o'rnatilgan ilovadek to'liq ekranda ishlaydi!</p>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-gym-border flex justify-end">
+                  <button 
+                    onClick={() => setShowQrModal(false)}
+                    className="w-full py-2 bg-gym-border hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition"
+                  >
+                    Tushundim
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Program Editor / Customizer Modal */}
+          {showEditor && (
+            <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3">
+              <div className="bg-gym-card border border-gym-border rounded-2xl w-full max-w-lg flex flex-col max-h-[90vh] shadow-2xl">
+                
+                <div className="flex items-center justify-between p-3.5 border-b border-gym-border">
+                  <div>
+                    <h3 className="font-bold text-sm text-white">4 Kunlik Dastur Sozlamalari</h3>
+                    <p className="text-[11px] text-gym-textMuted">Mashq nomlari va video linklarini tahrirlash</p>
+                  </div>
+                  <button 
+                    onClick={() => setShowEditor(false)}
+                    className="w-8 h-8 rounded-lg bg-gym-border/60 text-slate-300 hover:text-white flex items-center justify-center font-bold text-sm"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="p-3.5 flex-1 overflow-y-auto">
+                  <p className="text-xs text-slate-400 mb-2">
+                    Quyidagi JSON ma'lumotlarida 4 kunlik mashqlar, mushaklar guruhi va video linklari saqlanadi:
+                  </p>
+                  <textarea 
+                    value={jsonEditText}
+                    onChange={(e) => setJsonEditText(e.target.value)}
+                    rows="14"
+                    className="w-full bg-black/60 border border-gym-border rounded-xl p-3 text-xs font-mono text-emerald-400 focus:outline-none focus:border-emerald-500"
+                    spellCheck="false"
+                  ></textarea>
+
+                  <div className="mt-2.5 flex items-center justify-between">
+                    <button
+                      onClick={() => {
+                        if (confirm("Standart dastur holatiga qaytarilsinmi?")) {
+                          setJsonEditText(JSON.stringify(INITIAL_DAYS, null, 2));
+                        }
+                      }}
+                      className="text-xs text-rose-400 hover:underline"
+                    >
+                      Boshlang'ich holatga qaytarish
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3 border-t border-gym-border flex items-center justify-end gap-2">
+                  <button 
+                    onClick={() => setShowEditor(false)}
+                    className="px-3.5 py-2 text-xs font-semibold text-slate-300 hover:text-white rounded-lg"
+                  >
+                    Bekor qilish
+                  </button>
+                  <button 
+                    onClick={saveEditorJson}
+                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-bold text-xs rounded-xl shadow-lg shadow-emerald-500/20"
+                  >
+                    Saqlash va Yangilash
+                  </button>
+                </div>
+
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
