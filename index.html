@@ -575,6 +575,10 @@
       // Phone Connect / QR Modal
       const [showQrModal, setShowQrModal] = useState(false);
 
+      // Analytics / Progress Summary Modal
+      const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
+      const [copiedText, setCopiedText] = useState(false);
+
       // Screen WakeLock ref
       const wakeLockRef = useRef(null);
 
@@ -759,6 +763,45 @@
         }
       };
 
+      const getWorkoutSummaryText = () => {
+        let text = `📊 MENING IRONFIT TRENIROVKA NATIJALARIM (31 yosh • 75 kg • 180 sm)\n\n`;
+        daysData.forEach(day => {
+          text += `📅 ${day.title}: ${day.name}\n`;
+          let doneExCount = 0;
+          day.exercises.forEach(ex => {
+            const exLog = setLogs[ex.id] || {};
+            const doneSets = Object.entries(exLog).filter(([_, s]) => s?.done);
+            if (doneSets.length > 0) {
+              doneExCount++;
+              const setsStr = doneSets.map(([idx, s]) => {
+                const w = s.weight || (ex.defaultWeights ? ex.defaultWeights[idx] : '');
+                const r = s.reps || (ex.setTargets ? ex.setTargets[idx] : '');
+                return `${w ? w + 'kg' : ''} x ${r || '?'}`;
+              }).join(', ');
+              text += `  ✅ ${ex.title}: ${setsStr}\n`;
+            } else {
+              text += `  ❌ ${ex.title}: Bajarilmadi / Kuch yetmadi\n`;
+            }
+          });
+          text += `\n`;
+        });
+        return text;
+      };
+
+      const copySummaryToClipboard = () => {
+        const text = getWorkoutSummaryText();
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(() => {
+            setCopiedText(true);
+            setTimeout(() => setCopiedText(false), 2500);
+          }).catch(() => {
+            prompt("Ushbu matnni nusxalab oling:", text);
+          });
+        } else {
+          prompt("Ushbu matnni nusxalab oling:", text);
+        }
+      };
+
       return (
         <div className="max-w-md mx-auto min-h-screen px-3 pt-3 pb-28">
           
@@ -778,6 +821,13 @@
             </div>
 
             <div className="flex items-center gap-1.5">
+              <button 
+                onClick={() => setShowAnalyticsModal(true)}
+                className="p-2 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 text-xs flex items-center gap-1 active:scale-95 transition font-semibold"
+                title="Natijalar tahlili"
+              >
+                📊 <span className="hidden sm:inline">Analiz</span>
+              </button>
               <button 
                 onClick={() => setShowQrModal(true)}
                 className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-xs flex items-center gap-1 active:scale-95 transition font-semibold"
@@ -1214,6 +1264,144 @@
                     Tushundim
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Analytics / Progress Summary Modal */}
+          {showAnalyticsModal && (
+            <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 animate-fade-in">
+              <div className="bg-gym-card border border-gym-border rounded-2xl w-full max-w-lg flex flex-col max-h-[90vh] shadow-2xl overflow-hidden">
+                
+                {/* Header */}
+                <div className="flex items-center justify-between p-3.5 border-b border-gym-border">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">📊</span>
+                    <div>
+                      <h3 className="font-bold text-sm text-white">Trenirovka Tahlili</h3>
+                      <p className="text-[11px] text-gym-textMuted">4 kunlik natijalaringiz va tahlil</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setShowAnalyticsModal(false)}
+                    className="w-8 h-8 rounded-lg bg-gym-border/60 text-slate-300 hover:text-white flex items-center justify-center font-bold text-xs"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Content */}
+                <div className="p-3.5 flex-1 overflow-y-auto space-y-3.5">
+                  
+                  {/* Copy Button Card */}
+                  <div className="bg-gradient-to-r from-blue-950/40 via-gym-card to-slate-900 border border-blue-500/30 p-3 rounded-xl flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-bold text-white text-xs">Murabbiy bilan tahlil qilish</p>
+                      <p className="text-[10px] text-slate-400">Natijalaringizni nusxalab, chatga tashlashingiz mumkin</p>
+                    </div>
+                    <button
+                      onClick={copySummaryToClipboard}
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition active:scale-95 flex items-center gap-1 ${
+                        copiedText 
+                          ? 'bg-emerald-500 text-black' 
+                          : 'bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-500/20'
+                      }`}
+                    >
+                      {copiedText ? '✓ Nusxalandi!' : '📋 Nusxalash'}
+                    </button>
+                  </div>
+
+                  {/* Day by Day Review */}
+                  {daysData.map(day => {
+                    let totalSets = 0;
+                    let completedSets = 0;
+                    day.exercises.forEach(ex => {
+                      totalSets += ex.sets;
+                      const exLog = setLogs[ex.id] || {};
+                      for (let i = 0; i < ex.sets; i++) {
+                        if (exLog[i]?.done) completedSets++;
+                      }
+                    });
+                    const pct = totalSets > 0 ? Math.round((completedSets / totalSets) * 100) : 0;
+
+                    return (
+                      <div key={day.id} className="bg-slate-900/60 border border-gym-border/70 rounded-xl p-3">
+                        <div className="flex items-center justify-between pb-2 border-b border-gym-border/50">
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider">
+                              {day.title} • {day.subtitle}
+                            </span>
+                            <h4 className="font-bold text-xs text-white">{day.name}</h4>
+                          </div>
+                          <span className={`text-xs font-black px-2 py-0.5 rounded ${
+                            pct === 100 
+                              ? 'bg-emerald-500/20 text-emerald-300' 
+                              : pct > 50 
+                                ? 'bg-amber-500/20 text-amber-300' 
+                                : 'bg-slate-800 text-slate-400'
+                          }`}>
+                            {completedSets} / {totalSets} podxod ({pct}%)
+                          </span>
+                        </div>
+
+                        <div className="mt-2.5 space-y-1.5">
+                          {day.exercises.map(ex => {
+                            const exLog = setLogs[ex.id] || {};
+                            const doneSets = Object.entries(exLog).filter(([_, s]) => s?.done);
+                            const isDone = doneSets.length > 0;
+
+                            return (
+                              <div key={ex.id} className="text-[11px] flex items-start justify-between gap-2 p-1.5 rounded-lg bg-black/30">
+                                <div className="flex-1">
+                                  <span className="font-semibold text-slate-200">
+                                    {isDone ? '✅' : '⚠️'} {ex.title}
+                                  </span>
+                                  {isDone ? (
+                                    <p className="text-[10px] text-emerald-400 mt-0.5">
+                                      {doneSets.map(([idx, s]) => {
+                                        const w = s.weight || (ex.defaultWeights ? ex.defaultWeights[idx] : '');
+                                        const r = s.reps || (ex.setTargets ? ex.setTargets[idx] : '');
+                                        return `#${parseInt(idx)+1}: ${w ? w + 'kg' : ''} × ${r}`;
+                                      }).join(' | ')}
+                                    </p>
+                                  ) : (
+                                    <p className="text-[10px] text-rose-400/80 mt-0.5 font-medium">
+                                      Bajarilmagan yoki kuch yetmagan
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Scientific Coach Advice Box */}
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-200/90 space-y-2">
+                    <p className="font-bold text-amber-300 flex items-center gap-1">
+                      <span>💡</span> Murabbiy tahlili: Nega 4-kunda kuch yetmadi?
+                    </p>
+                    <ul className="list-disc list-inside space-y-1 text-[11px] text-slate-300">
+                      <li><strong>Ortiqcha yuklama (Yelka):</strong> 4-kunda 3 ta press mashqi (Jim iz-za golovi, Shvung, Gantel press) ketma-ket kelgan. Yangi boshlovchi deltalari bunga toliqqani mutlaqo tabiiy!</li>
+                      <li><strong>Turnik (Otkazgacha):</strong> 75 kg vaznda turnikda oxirigacha tortilish nerv sistemasini qattiq charchatadi. Boshida Gravitron yoki rezinka bilan qilish shart.</li>
+                      <li><strong>Mushaklar tiklanishi:</strong> Har bir mashg'ulot orasida kamida 24-48 soat dam olish (uyqu, to'g'ri ovqatlanish) bo'lishi kerak.</li>
+                    </ul>
+                  </div>
+
+                </div>
+
+                {/* Footer */}
+                <div className="p-3 border-t border-gym-border flex justify-end">
+                  <button 
+                    onClick={() => setShowAnalyticsModal(false)}
+                    className="px-4 py-2 bg-gym-border hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition"
+                  >
+                    Yopish
+                  </button>
+                </div>
+
               </div>
             </div>
           )}
